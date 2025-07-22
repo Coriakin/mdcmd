@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  mdcms:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      # Content and themes directories mapped to local directories
+      - ./content:/app/content
+      - ./themes:/app/themes
+      # Configuration files
+      - ./config.json:/app/config.json
+      - ./analytics.json:/app/analytics.json
+      # SSL certificates
+      - ./ssl:/app/ssl
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped
+    container_name: mdcms-app
+    
+    # Health check to ensure the service is running
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('https').get('https://localhost:3000/', {rejectUnauthorized: false}, (res) => process.exit(res.statusCode === 404 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s

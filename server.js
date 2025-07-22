@@ -68,6 +68,7 @@ class Analytics {
       week: visits.filter(v => new Date(v.timestamp) >= week).length,
       month: visits.filter(v => new Date(v.timestamp) >= month).length,
       popularPages: this.getPopularPages(visits),
+      pageViewCounts: this.getPageViewCounts(visits),
       recentVisits: visits.slice(-50).reverse()
     };
   }
@@ -83,6 +84,28 @@ class Analytics {
       .sort(([,a], [,b]) => b - a)
       .slice(0, 10)
       .map(([page, count]) => ({ page, count }));
+  }
+
+  getPageViewCounts(visits) {
+    const viewCounts = {};
+    
+    visits.forEach(visit => {
+      const page = visit.page.replace('/', ''); // Remove leading slash
+      const version = visit.version || 'v1';
+      
+      if (!viewCounts[page]) {
+        viewCounts[page] = {};
+      }
+      
+      viewCounts[page][version] = (viewCounts[page][version] || 0) + 1;
+    });
+    
+    // Calculate totals for each page
+    Object.keys(viewCounts).forEach(page => {
+      viewCounts[page]._total = Object.values(viewCounts[page]).reduce((sum, count) => sum + count, 0);
+    });
+    
+    return viewCounts;
   }
 }
 
@@ -278,6 +301,7 @@ class Server {
   adminDashboard(req, res) {
     const stats = this.analytics.getStats();
     const pages = this.contentManager.getAllPages();
+    const viewCounts = stats.pageViewCounts;
     
     const html = `
     <!DOCTYPE html>
@@ -295,6 +319,7 @@ class Server {
         .page-list { border-collapse: collapse; width: 100%; }
         .page-list th, .page-list td { border: 1px solid #ddd; padding: 10px; text-align: left; }
         .page-list th { background: #f5f5f5; }
+        .page-list th:nth-child(3), .page-list td:nth-child(3) { text-align: center; width: 80px; }
         .copy-btn { background: #007cba; color: white; border: none; padding: 5px 10px; cursor: pointer; border-radius: 3px; }
         .copy-btn:hover { background: #005a8b; }
         .version-indent { padding-left: 20px; font-size: 0.9em; color: #666; }
@@ -337,32 +362,34 @@ class Server {
             <tr>
               <th>Page</th>
               <th>Version</th>
+              <th>Views</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
             ${Object.entries(pages).map(([page, versions]) => {
               const latestVersion = Math.max(...versions.map(v => v.version));
-              return versions.map((v, i) => `
-                <tr>
-                  <td${i > 0 ? ' class="version-indent"' : ''}>${i === 0 ? page : `└─ v${v.version}${v.version === latestVersion ? ' (latest)' : ''}`}</td>
-                  <td>${v.version}</td>
-                  <td>
-                    <button class="copy-btn" onclick="copyUrl('${page}${i === 0 && versions.length === 1 ? '' : (v.version === latestVersion ? '' : '/v' + v.version)}')">Copy URL</button>
-                  </td>
-                </tr>
-              `).join('');
+              const pageViewData = viewCounts[page] || {};
+              const totalViews = pageViewData._total || 0;
+              
+              return versions.map((v, i) => {
+                const versionViews = pageViewData[`v${v.version}`] || 0;
+                return `
+                  <tr>
+                    <td${i > 0 ? ' class="version-indent"' : ''}>${i === 0 ? page : `└─ v${v.version}${v.version === latestVersion ? ' (latest)' : ''}`}</td>
+                    <td>${v.version}</td>
+                    <td${i > 0 ? ' class="version-indent"' : ''}>${i === 0 ? `<strong>${totalViews}</strong>` : versionViews}</td>
+                    <td>
+                      <button class="copy-btn" onclick="copyUrl('${page}${i === 0 && versions.length === 1 ? '' : (v.version === latestVersion ? '' : '/v' + v.version)}')">Copy URL</button>
+                    </td>
+                  </tr>
+                `;
+              }).join('');
             }).join('')}
           </tbody>
         </table>
       </div>
       
-      <div class="section">
-        <h2>Popular Pages</h2>
-        <div>
-          ${stats.popularPages.map(p => `<div>${p.page}: ${p.count} visits</div>`).join('')}
-        </div>
-      </div>
       
       <div class="section">
         <h2>Recent Visits</h2>

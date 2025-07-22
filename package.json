@@ -1,0 +1,19 @@
+{
+  "name": "mdcms",
+  "version": "1.0.0",
+  "description": "A markdown-based CMS with versioning and analytics",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": ["markdown", "cms", "fan-fiction", "versioning"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "marked": "^12.0.0",
+    "gray-matter": "^4.0.3",
+    "cookie-parser": "^1.4.6"
+  }
+}

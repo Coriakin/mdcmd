@@ -1,0 +1,69 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Runtime files
+*.log
+server.log
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Data files (these contain sensitive/dynamic data)
+analytics.json
+config.json
+
+# SSL certificates (security sensitive)
+ssl/
+*.pem
+*.key
+*.crt
+*.cert
+
+# Environment files
+.env
+.env.local
+.env.production
+.env.test
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+tmp/
+temp/
+.tmp/
+
+# Build artifacts (if added later)
+dist/
+build/
+
+# Coverage reports (if tests added)
+coverage/
+.nyc_output/
+
+# Optional: Content files (uncomment if you want to version control content separately)
+# content/
+# themes/
+
+# Keep example files
+!content/hello.md
+!content/demo-story.md
+!content/demo-story.v2.md
+!config.json.example

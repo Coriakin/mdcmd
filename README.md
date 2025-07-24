@@ -35,7 +35,13 @@ For production, use real certificates from Let's Encrypt or your certificate aut
 
 ### 3. Configure the Application
 
-Edit `config.json`:
+Copy the example configuration and edit it:
+
+```bash
+cp config.json.example config.json
+```
+
+Then edit `config.json`:
 
 ```json
 {
@@ -153,6 +159,17 @@ Reference images in markdown:
 ![Chapter 1](./chapter1.png)
 ```
 
+#### Obsidian-Style Image Embedding
+
+MDCMS also supports Obsidian-style image embedding for easier content migration:
+
+```markdown
+![['my-story/cover.jpg']]
+![['assets/diagram.png']]
+```
+
+These will be automatically converted to standard markdown image syntax with proper URL encoding for spaces and special characters.
+
 ## Admin Interface
 
 ### Accessing Admin
@@ -179,11 +196,12 @@ All visitor data is stored in `analytics.json` with:
 
 ## Themes
 
-Three built-in themes are available:
+Four built-in themes are available:
 
 - **default** - Clean, GitHub-inspired design
 - **dark** - Dark mode with syntax highlighting
 - **minimal** - Typography-focused, minimal design
+- **ember-sanctum** - Rich, warm theme with ember-like styling
 
 ### Using Themes
 
@@ -242,14 +260,36 @@ services:
   mdcms:
     build: .
     ports:
-      - "443:3000"
+      - "3000:3000"  # Change to "443:3000" for production HTTPS
     volumes:
-      - ./content:/app/content:ro
-      - ./themes:/app/themes:ro
-      - ./config.json:/app/config.json:ro
-      - ./ssl:/app/ssl:ro
+      # Content and themes directories
+      - ./content:/app/content
+      - ./themes:/app/themes
+      # Configuration files (create from examples)
+      - ./config.json:/app/config.json
       - ./analytics.json:/app/analytics.json
+      # SSL certificates
+      - ./ssl:/app/ssl
+    environment:
+      - NODE_ENV=production
     restart: unless-stopped
+    container_name: mdcms-app
+    
+    # Health check to ensure the service is running
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('https').get('https://localhost:3000/', {rejectUnauthorized: false}, (res) => process.exit(res.statusCode === 404 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+```
+
+**Before running Docker:**
+```bash
+# Copy configuration template
+cp config.json.example config.json
+# Edit config.json with your settings
+# Ensure SSL certificates exist in ssl/ directory
 ```
 
 Run with:
@@ -292,7 +332,8 @@ mdcms/
 ├── themes/            # CSS themes
 │   ├── default.css
 │   ├── dark.css
-│   └── minimal.css
+│   ├── minimal.css
+│   └── ember-sanctum.css
 └── ssl/              # HTTPS certificates
     ├── cert.pem
     └── key.pem

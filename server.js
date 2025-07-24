@@ -228,8 +228,8 @@ class Server {
     // Static assets from content directories (more specific patterns)
     this.app.get('/:page/:file', this.serveAsset.bind(this));
     
-    // Root path
-    this.app.get('/', this.serve404.bind(this));
+    // Root path - serve index.md if it exists
+    this.app.get('/', this.serveIndex.bind(this));
   }
 
   requireAuth(req, res, next) {
@@ -527,6 +527,25 @@ class Server {
         this.serve404(req, res);
       }
     } catch (error) {
+      this.serve404(req, res);
+    }
+  }
+
+  serveIndex(req, res) {
+    const content = this.contentManager.getContent('index');
+    if (content) {
+      // Track visit for index
+      this.analytics.track({
+        page: '/',
+        version: `v${content.version}`,
+        ipHash: crypto.createHash('sha256').update(req.ip).digest('hex'),
+        userAgent: req.get('User-Agent'),
+        referer: req.get('Referer')
+      });
+      
+      const html = this.renderPage(content, 'index');
+      res.send(html);
+    } else {
       this.serve404(req, res);
     }
   }

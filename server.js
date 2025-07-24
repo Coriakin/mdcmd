@@ -438,10 +438,29 @@ class Server {
     res.send(html);
   }
 
+  preprocessObsidianImages(content) {
+    // Convert Obsidian-style image embeds ![['path/to/image']] to standard markdown ![alt](path)
+    return content.replace(/!\[\['([^']+)'\]\]/g, (_, imagePath) => {
+      // Extract filename for alt text
+      const filename = path.basename(imagePath);
+      const altText = filename.replace(/\.[^/.]+$/, ""); // Remove extension for alt text
+      
+      // URL encode the path to handle spaces and special characters
+      const encodedPath = imagePath.split('/').map(segment => encodeURIComponent(segment)).join('/');
+      
+      // Convert to standard markdown image syntax
+      // The path should be relative to the page directory
+      return `![${altText}](/${encodedPath})`;
+    });
+  }
+
   renderPage(content, pageName) {
     const title = content.data.title || pageName;
     const theme = content.data.theme || this.config.defaultTheme || 'default';
-    const renderedMarkdown = marked(content.content);
+    
+    // Preprocess Obsidian-style image embeds
+    const preprocessedContent = this.preprocessObsidianImages(content.content);
+    const renderedMarkdown = marked(preprocessedContent);
     
     // Check if version navigation should be shown
     const showVersions = content.data['public-versions'] !== false && content.versions.length > 1;
@@ -481,21 +500,22 @@ class Server {
   }
 
   serveAsset(req, res) {
-    // Extract page name from URL
-    const urlParts = req.path.split('/').filter(Boolean);
-    const pageName = urlParts[0];
-    const fileName = urlParts[urlParts.length - 1];
-    
-    // Security check - only serve from content directory
-    const assetPath = path.join(__dirname, 'content', pageName, fileName);
-    const normalizedPath = path.normalize(assetPath);
-    const contentDir = path.join(__dirname, 'content');
-    
-    if (!normalizedPath.startsWith(contentDir)) {
-      return this.serve404(req, res);
-    }
-    
     try {
+      // Decode URL path to handle spaces and special characters
+      const decodedPath = decodeURIComponent(req.path);
+      const urlParts = decodedPath.split('/').filter(Boolean);
+      const pageName = urlParts[0];
+      const fileName = urlParts[urlParts.length - 1];
+      
+      // Security check - only serve from content directory
+      const assetPath = path.join(__dirname, 'content', pageName, fileName);
+      const normalizedPath = path.normalize(assetPath);
+      const contentDir = path.join(__dirname, 'content');
+      
+      if (!normalizedPath.startsWith(contentDir)) {
+        return this.serve404(req, res);
+      }
+      
       if (fs.existsSync(assetPath) && fs.statSync(assetPath).isFile()) {
         // Block serving markdown and config files
         if (fileName.endsWith('.md') || fileName.endsWith('.json')) {

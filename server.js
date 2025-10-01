@@ -7,6 +7,24 @@ const matter = require('gray-matter');
 const cookieParser = require('cookie-parser');
 const crypto = require('crypto');
 
+const BOT_USER_AGENT_PATTERN = /(bot|crawler|spider|crawl|slurp|headless|wget|curl|python-requests|httpclient|scrapy|mediapartners-google|preview|monitor|scanner|pingdom|facebookexternalhit|discordbot|slackbot|mastodon|telegrambot|harvest|indexer|lighthouse)/i;
+
+function isLikelyBot(userAgent = '') {
+  if (!userAgent) {
+    return false;
+  }
+  return BOT_USER_AGENT_PATTERN.test(userAgent);
+}
+
+function escapeHtml(value = '') {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 class Analytics {
   constructor() {
     this.writeQueue = [];
@@ -69,6 +87,8 @@ class Analytics {
       month: visits.filter(v => new Date(v.timestamp) >= month).length,
       popularPages: this.getPopularPages(visits),
       pageViewCounts: this.getPageViewCounts(visits),
+      visitorTypeCounts: this.getVisitorTypeCounts(visits),
+      trafficSources: this.getTrafficSources(visits),
       recentVisits: visits.slice(-50).reverse()
     };
   }
@@ -76,7 +96,8 @@ class Analytics {
   getPopularPages(visits) {
     const pageCount = {};
     visits.forEach(visit => {
-      const key = visit.version ? `${visit.page} (${visit.version})` : visit.page;
+      const pageLabel = visit.page === '/' ? '/ (index)' : visit.page;
+      const key = visit.version ? `${pageLabel} (${visit.version})` : pageLabel;
       pageCount[key] = (pageCount[key] || 0) + 1;
     });
     
@@ -90,9 +111,17 @@ class Analytics {
     const viewCounts = {};
     
     visits.forEach(visit => {
-      const page = visit.page.replace('/', ''); // Remove leading slash
+      if (!visit.page) {
+        return;
+      }
+
+      const page = visit.page === '/' ? 'index' : visit.page.replace(/^\//, '');
       const version = visit.version || 'v1';
       
+      if (!page) {
+        return;
+      }
+
       if (!viewCounts[page]) {
         viewCounts[page] = {};
       }
@@ -106,6 +135,52 @@ class Analytics {
     });
     
     return viewCounts;
+  }
+
+  getVisitorTypeCounts(visits) {
+    return visits.reduce(
+      (acc, visit) => {
+        if (isLikelyBot(visit.userAgent)) {
+          acc.bots += 1;
+        } else {
+          acc.humans += 1;
+        }
+        return acc;
+      },
+      { humans: 0, bots: 0 }
+    );
+  }
+
+  getTrafficSources(visits) {
+    const sourceCounts = new Map();
+    let directCount = 0;
+
+    visits.forEach(visit => {
+      if (!visit.referer) {
+        directCount += 1;
+        return;
+      }
+
+      let source;
+      try {
+        const refererUrl = new URL(visit.referer);
+        source = refererUrl.hostname || visit.referer;
+      } catch (error) {
+        source = visit.referer;
+      }
+
+      sourceCounts.set(source, (sourceCounts.get(source) || 0) + 1);
+    });
+
+    const sortedSources = Array.from(sourceCounts.entries())
+      .sort(([, a], [, b]) => b - a)
+      .map(([source, count]) => ({ source, count }));
+
+    if (directCount > 0) {
+      sortedSources.unshift({ source: 'Direct / Unknown', count: directCount });
+    }
+
+    return sortedSources.slice(0, 10);
   }
 }
 
@@ -302,6 +377,24 @@ class Server {
     const stats = this.analytics.getStats();
     const pages = this.contentManager.getAllPages();
     const viewCounts = stats.pageViewCounts;
+    const visitorCounts = stats.visitorTypeCounts || { humans: 0, bots: 0 };
+    const trafficSources = stats.trafficSources || [];
+    const totalVisitorCount = visitorCounts.humans + visitorCounts.bots;
+    const humanPercentage = totalVisitorCount ? Math.round((visitorCounts.humans / totalVisitorCount) * 100) : 0;
+    const botPercentage = totalVisitorCount ? Math.round((visitorCounts.bots / totalVisitorCount) * 100) : 0;
+
+    const formatReferer = (referer) => {
+      if (!referer) {
+        return 'Direct / Unknown';
+      }
+      try {
+        const refererUrl = new URL(referer);
+        const path = refererUrl.pathname && refererUrl.pathname !== '/' ? refererUrl.pathname : '';
+        return `${refererUrl.hostname}${path}`;
+      } catch (error) {
+        return referer;
+      }
+    };
     
     const html = `
     <!DOCTYPE html>
@@ -324,8 +417,24 @@ class Server {
         .copy-btn:hover { background: #005a8b; }
         .version-indent { padding-left: 20px; font-size: 0.9em; color: #666; }
         .logout-btn { background: #dc3545; color: white; text-decoration: none; padding: 8px 16px; border-radius: 4px; }
-        .recent-visits { max-height: 300px; overflow-y: auto; border: 1px solid #ddd; }
-        .visit-item { padding: 8px; border-bottom: 1px solid #eee; font-size: 0.9em; }
+        .page-base-row td:first-child { font-weight: 600; }
+        .version-row td { background: #fafafa; }
+        .insights { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 20px; }
+        .insight-card { background: #f5f5f5; padding: 16px; border-radius: 6px; }
+        .insight-card h3 { margin-top: 0; font-size: 1.1em; }
+        .insight-card p { margin: 6px 0; }
+        .traffic-list { list-style: none; padding: 0; margin: 0; }
+        .traffic-list li { padding: 4px 0; border-bottom: 1px solid #eee; font-size: 0.9em; }
+        .traffic-list li:last-child { border-bottom: none; }
+        .table-wrapper { border: 1px solid #ddd; border-radius: 4px; overflow: hidden; max-height: 320px; overflow-y: auto; }
+        .visit-table { width: 100%; border-collapse: collapse; font-size: 0.9em; }
+        .visit-table th, .visit-table td { padding: 8px 10px; border-bottom: 1px solid #eee; vertical-align: top; }
+        .visit-table th { position: sticky; top: 0; background: #f5f5f5; z-index: 1; }
+        .visit-table td a { color: #007cba; text-decoration: none; }
+        .visit-table td a:hover { text-decoration: underline; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.75em; font-weight: 600; }
+        .badge.human { background: #e6f4ea; color: #1b5e20; }
+        .badge.bot { background: #fce8e6; color: #b71c1c; }
       </style>
     </head>
     <body>
@@ -371,20 +480,35 @@ class Server {
               const latestVersion = Math.max(...versions.map(v => v.version));
               const pageViewData = viewCounts[page] || {};
               const totalViews = pageViewData._total || 0;
-              
-              return versions.map((v, i) => {
+              const displayName = page === 'index' ? 'index (home)' : page;
+              const rootPath = page === 'index' ? '/' : `/${page}`;
+              const versionRows = versions.length > 1 ? versions.map(v => {
                 const versionViews = pageViewData[`v${v.version}`] || 0;
+                const isLatest = v.version === latestVersion;
+                const versionPath = page === 'index' ? `/index/v${v.version}` : `/${page}/v${v.version}`;
                 return `
-                  <tr>
-                    <td${i > 0 ? ' class="version-indent"' : ''}>${i === 0 ? page : `└─ v${v.version}${v.version === latestVersion ? ' (latest)' : ''}`}</td>
+                  <tr class="version-row">
+                    <td class="version-indent">└─ v${v.version}${isLatest ? ' (latest)' : ''}</td>
                     <td>${v.version}</td>
-                    <td${i > 0 ? ' class="version-indent"' : ''}>${i === 0 ? `<strong>${totalViews}</strong>` : versionViews}</td>
+                    <td>${versionViews}</td>
                     <td>
-                      <button class="copy-btn" onclick="copyUrl('${page}${i === 0 && versions.length === 1 ? '' : (v.version === latestVersion ? '' : '/v' + v.version)}')">Copy URL</button>
+                      <button class="copy-btn" data-path="${escapeHtml(versionPath)}" onclick="copyUrl(this.dataset.path)">Copy URL</button>
                     </td>
                   </tr>
                 `;
-              }).join('');
+              }).join('') : '';
+              
+              return `
+                <tr class="page-base-row">
+                  <td>${escapeHtml(displayName)}</td>
+                  <td>v${latestVersion} (latest)</td>
+                  <td><strong>${totalViews}</strong></td>
+                  <td>
+                    <button class="copy-btn" data-path="${escapeHtml(rootPath)}" onclick="copyUrl(this.dataset.path)">Copy URL</button>
+                  </td>
+                </tr>
+                ${versionRows}
+              `;
             }).join('')}
           </tbody>
         </table>
@@ -392,22 +516,84 @@ class Server {
       
       
       <div class="section">
+        <h2>Visitor Insights</h2>
+        <div class="insights">
+          <div class="insight-card">
+            <h3>Humans vs Bots</h3>
+            <p><strong>Humans:</strong> ${visitorCounts.humans} (${humanPercentage}%)</p>
+            <p><strong>Bots:</strong> ${visitorCounts.bots} (${botPercentage}%)</p>
+            <p><small>Total tracked visits: ${totalVisitorCount}</small></p>
+          </div>
+          <div class="insight-card">
+            <h3>Top Traffic Sources</h3>
+            <ul class="traffic-list">
+              ${trafficSources.length === 0
+                ? '<li>No data yet</li>'
+                : trafficSources.map(source => `
+                    <li><strong>${escapeHtml(source.source)}</strong> &middot; ${source.count}</li>
+                  `).join('')}
+            </ul>
+          </div>
+        </div>
+      </div>
+      
+      <div class="section">
         <h2>Recent Visits</h2>
-        <div class="recent-visits">
-          ${stats.recentVisits.slice(0, 20).map(visit => `
-            <div class="visit-item">
-              ${new Date(visit.timestamp).toLocaleString()} - ${visit.page}${visit.version ? ` (${visit.version})` : ''} - ${visit.ipHash?.substring(0, 8)}...
-            </div>
-          `).join('')}
+        <div class="table-wrapper">
+          <table class="visit-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Page</th>
+                <th>Version</th>
+                <th>Visitor</th>
+                <th>Referer</th>
+                <th>User Agent</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${stats.recentVisits.slice(0, 20).map(visit => {
+                const isBotVisit = isLikelyBot(visit.userAgent);
+                const visitorLabel = isBotVisit ? 'Bot' : 'Human';
+                const visitorClass = isBotVisit ? 'bot' : 'human';
+                const ipFragment = visit.ipHash ? visit.ipHash.substring(0, 8) : '—';
+                const visitPath = visit.page === '/' ? '/' : (visit.page || 'Unknown');
+                const refererText = visit.referer ? formatReferer(visit.referer) : 'Direct / Unknown';
+                const refererCell = visit.referer
+                  ? `<a href="${escapeHtml(visit.referer)}" target="_blank" rel="noopener">${escapeHtml(refererText)}</a>`
+                  : 'Direct / Unknown';
+                const userAgent = visit.userAgent ? escapeHtml(visit.userAgent) : 'Unknown';
+                return `
+                  <tr>
+                    <td>${escapeHtml(new Date(visit.timestamp).toLocaleString())}</td>
+                    <td>${escapeHtml(visitPath)}</td>
+                    <td>${escapeHtml(visit.version || '—')}</td>
+                    <td><span class="badge ${visitorClass}">${visitorLabel}</span> · ${escapeHtml(ipFragment)}</td>
+                    <td>${refererCell}</td>
+                    <td>${userAgent}</td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
         </div>
       </div>
       
       <script>
         function copyUrl(path) {
-          const url = window.location.protocol + '//' + window.location.host + '/' + path;
-          navigator.clipboard.writeText(url).then(() => {
-            alert('URL copied to clipboard: ' + url);
-          });
+          if (!path) {
+            return;
+          }
+
+          try {
+            const resolved = new URL(path, window.location.origin);
+            const url = resolved.href;
+            navigator.clipboard.writeText(url).then(() => {
+              alert('URL copied to clipboard: ' + url);
+            });
+          } catch (error) {
+            console.error('Unable to copy URL', error);
+          }
         }
       </script>
     </body>

@@ -58,8 +58,8 @@ build/
 coverage/
 .nyc_output/
 
-# Optional: Content files (uncomment if you want to version control content separately)
-# content/
+# Content files (ignore generated content while keeping examples tracked)
+content/*
 # themes/
 
 # Keep example files
